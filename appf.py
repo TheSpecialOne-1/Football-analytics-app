@@ -13,9 +13,6 @@ import random
 # Use relative paths (✅ cloud-ready)
 # --- PATHS ---
 data_path = "data"
-# Add this right after setting data_path
-st.write("Current working directory:", os.getcwd())
-st.write("Full matches path:", os.path.abspath(os.path.join(data_path, "matches/43/3.json")))
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 data_path = os.path.join(BASE_DIR, "data")
