@@ -13,7 +13,8 @@ import random
 # Use relative paths (✅ cloud-ready)
 # --- PATHS ---
 data_path = "data"
-
+DB_PATH = os.path.join(os.path.dirname(__file__), 'database/database.sqlite')
+conn = sqlite3.connect(DB_PATH)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 data_path = os.path.join(BASE_DIR, "data")
 events_path = os.path.join(data_path, "events")
