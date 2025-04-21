@@ -9,17 +9,32 @@ import statsmodels.api as sm
 import statsmodels.formula.api as smf
 import plotly.graph_objects as go
 import random
+import sqlite3
 
 # Use relative paths (✅ cloud-ready)
 # --- PATHS ---
 data_path = "data"
-DB_PATH = os.path.join(os.path.dirname(__file__), 'database/database.sqlite')
-conn = sqlite3.connect(DB_PATH)
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 data_path = os.path.join(BASE_DIR, "data")
 events_path = os.path.join(data_path, "events")
 matches_path = os.path.join(data_path, "matches")
 competitions_path = os.path.join(data_path, "competitions.json")
+
+
+
+# Database connection with error handling
+DB_PATH = os.path.join(os.path.dirname(__file__), 'database/database.sqlite')
+try:
+    conn = sqlite3.connect(DB_PATH)
+    # Test the connection
+    cursor = conn.cursor()
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+    tables = cursor.fetchall()
+    st.success("Database connected successfully!")
+except sqlite3.Error as e:
+    st.error(f"Database connection failed: {e}")
+    st.stop()  # Stop the app if we can't connect to the database
 
 # Set page config
 st.set_page_config(page_title="Soccer Analysis App", layout="wide")
