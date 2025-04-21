@@ -11,7 +11,7 @@ import plotly.graph_objects as go
 import random
 
 
-# Use relative paths (✅ cloud-ready)
+'''# Use relative paths (✅ cloud-ready)
 # --- PATHS ---
 data_path = "data"
 
@@ -19,8 +19,43 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 data_path = os.path.join(BASE_DIR, "data")
 events_path = os.path.join(data_path, "events")
 matches_path = os.path.join(data_path, "matches")
-competitions_path = os.path.join(data_path, "competitions.json")
+competitions_path = os.path.join(data_path, "competitions.json")'''
 
+from pathlib import Path
+
+def load_match_data(competition_id, season_id):
+    try:
+        # Get the base directory of your app
+        base_dir = Path(__file__).parent
+        
+        # Construct the path to your JSON file
+        data_path = base_dir / "data" / "matches" / str(competition_id) / f"{season_id}.json"
+        
+        st.write(f"Looking for file at: {data_path}")  # Debugging
+        
+        if not data_path.exists():
+            st.error(f"File not found at: {data_path}")
+            st.error("Please verify:")
+            st.error("1. The file exists in your GitHub repository")
+            st.error("2. The path is correct (case-sensitive)")
+            st.error("3. The file was committed to Git")
+            return None
+            
+        with open(data_path, 'r') as f:
+            return json.load(f)
+            
+    except Exception as e:
+        st.error(f"Error loading data: {str(e)}")
+        return None
+
+competition_id = 43  # Ligue 1
+season_id = 3
+
+match_data = load_match_data(competition_id, season_id)
+
+if match_data:
+    st.success("Data loaded successfully!")
+    st.json(match_data)  # Display the raw data (remove in production)
 
 
 
