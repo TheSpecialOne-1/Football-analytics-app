@@ -203,17 +203,59 @@ if option.endswith("1. Load Match Data"):
                     if matches is not None:
                         st.success(f"✅ Found {len(matches)} matches")
                         
-                        # Show sample matches
-                        if matches:
-                            sample_match = matches[0]
-                            st.subheader("Sample Match Data:")
-                            st.json(sample_match)
+                        # Create match summary table with team matchups and match IDs
+                        match_data = []
+                        for match in matches:
+                            if isinstance(match, dict) and 'match_id' in match:
+                                match_id = match['match_id']
+                                
+                                # Extract team names
+                                home_team = "Unknown"
+                                away_team = "Unknown"
+                                
+                                if 'home_team' in match:
+                                    if isinstance(match['home_team'], dict):
+                                        home_team = match['home_team'].get('home_team_name', 'Unknown')
+                                    elif isinstance(match['home_team'], str):
+                                        home_team = match['home_team']
+                                
+                                if 'away_team' in match:
+                                    if isinstance(match['away_team'], dict):
+                                        away_team = match['away_team'].get('away_team_name', 'Unknown')
+                                    elif isinstance(match['away_team'], str):
+                                        away_team = match['away_team']
+                                
+                                # Get match date if available
+                                match_date = match.get('match_date', 'Unknown')
+                                
+                                # Get scores if available
+                                home_score = match.get('home_score', '?')
+                                away_score = match.get('away_score', '?')
+                                
+                                match_data.append({
+                                    'Match_ID': match_id,
+                                    'Home_Team': home_team,
+                                    'Away_Team': away_team,
+                                    'Score': f"{home_score} - {away_score}",
+                                    'Date': match_date,
+                                    'Matchup': f"{home_team} vs {away_team}"
+                                })
+                        
+                        if match_data:
+                            matches_df = pd.DataFrame(match_data)
+                            st.subheader("Match Fixtures:")
+                            st.dataframe(matches_df, use_container_width=True)
                             
                             # Show available teams
                             teams = get_available_teams(comp_id, season_id)
                             if teams:
                                 st.subheader("Available Teams:")
-                                st.write(", ".join(teams[:10]))  # Show first 10 teams
+                                team_cols = st.columns(4)
+                                for i, team in enumerate(teams):
+                                    with team_cols[i % 4]:
+                                        st.write(f"• {team}")
+                        else:
+                            st.warning("No valid match data found.")
                             
                     else:
                         st.error("❌ Error loading match file.")
@@ -257,20 +299,29 @@ elif option.endswith("2. Danger Pass Heatmap"):
                     
                     all_danger_passes = []
                     processed_matches = 0
+                    errors_count = 0
                     
-                    for match_id in match_ids[:5]:  # Limit to first 5 matches for performance
+                    # Process ALL matches for the team (removed limit)
+                    for i, match_id in enumerate(match_ids, 1):
+                        st.write(f"Processing match {i}/{len(match_ids)}: {match_id}")
+                        
                         event_file = os.path.join(events_path, f"{match_id}.json")
                         
                         if not os.path.exists(event_file):
                             st.warning(f"Event file not found for match {match_id}")
+                            errors_count += 1
                             continue
                             
                         events_data = safe_load_json(event_file)
                         if events_data is None:
+                            st.warning(f"Could not load event data for match {match_id}")
+                            errors_count += 1
                             continue
                             
                         df = safe_json_normalize(events_data)
                         if df.empty:
+                            st.warning(f"Empty event data for match {match_id}")
+                            errors_count += 1
                             continue
                         
                         processed_matches += 1
@@ -280,6 +331,7 @@ elif option.endswith("2. Danger Pass Heatmap"):
                         team_events = df[team_filter]
                         
                         if team_events.empty:
+                            st.warning(f"No events found for {team_required} in match {match_id}")
                             continue
                         
                         # Get passes and shots
@@ -313,8 +365,11 @@ elif option.endswith("2. Danger Pass Heatmap"):
                             
                             if danger_passes:
                                 all_danger_passes.extend(danger_passes)
+                                st.write(f"  → Found {len(danger_passes)} danger passes")
                     
-                    st.info(f"Processed {processed_matches} matches")
+                    st.success(f"✅ Processed {processed_matches}/{len(match_ids)} matches successfully")
+                    if errors_count > 0:
+                        st.warning(f"⚠️ {errors_count} matches had errors")
                     
                     if all_danger_passes:
                         # Create heatmap
@@ -396,13 +451,16 @@ elif option.endswith("3. Pass Comparison"):
                 else:
                     team_stats = []
                     processed_matches = 0
+                    total_matches = len(matches_data)
                     
-                    # Process each match
-                    for match in matches_data[:10]:  # Limit to first 10 matches for performance
+                    # Process ALL matches (removed limit)
+                    for i, match in enumerate(matches_data, 1):
                         if not isinstance(match, dict) or 'match_id' not in match:
                             continue
                         
                         match_id = match['match_id']
+                        st.write(f"Processing match {i}/{total_matches}: {match_id}")
+                        
                         event_file = os.path.join(events_path, f"{match_id}.json")
                         
                         if not os.path.exists(event_file):
@@ -470,35 +528,60 @@ elif option.endswith("3. Pass Comparison"):
                         team_aggregated['Avg_Shots'] = team_aggregated['Shots'] / team_aggregated['Matches_Played']
                         team_aggregated['Goals_Per_Match'] = team_aggregated['Goals'] / team_aggregated['Matches_Played']
                         
-                        st.subheader(f"Team Comparison ({processed_matches} matches processed)")
-                        st.dataframe(team_aggregated.round(2))
+                        st.success(f"✅ Processed {processed_matches} matches")
+                        st.subheader(f"Team Comparison - All {len(team_aggregated)} Teams")
+                        st.dataframe(team_aggregated.round(2), use_container_width=True)
                         
                         # Create visualization
                         if len(team_aggregated) > 1:
-                            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+                            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 8))
                             
                             # Passes vs Shots scatter plot
-                            ax1.scatter(team_aggregated['Avg_Passes'], team_aggregated['Avg_Shots'], 
-                                       s=team_aggregated['Goals']*50+50, alpha=0.7, c=team_aggregated['Goals'], cmap='viridis')
+                            scatter = ax1.scatter(team_aggregated['Avg_Passes'], team_aggregated['Avg_Shots'], 
+                                                s=team_aggregated['Goals']*30+50, alpha=0.7, 
+                                                c=team_aggregated['Goals'], cmap='viridis')
                             ax1.set_xlabel('Average Passes per Match')
                             ax1.set_ylabel('Average Shots per Match')
                             ax1.set_title('Passes vs Shots (bubble size = total goals)')
                             
                             # Add team labels
                             for team, row in team_aggregated.iterrows():
-                                ax1.annotate(team[:10], (row['Avg_Passes'], row['Avg_Shots']), 
-                                            xytext=(5, 5), textcoords='offset points', fontsize=8)
+                                ax1.annotate(team[:8], (row['Avg_Passes'], row['Avg_Shots']), 
+                                            xytext=(3, 3), textcoords='offset points', fontsize=7)
+                            
+                            # Add colorbar
+                            plt.colorbar(scatter, ax=ax1, label='Total Goals')
                             
                             # Goals per match bar chart
                             teams_sorted = team_aggregated.sort_values('Goals_Per_Match', ascending=True)
-                            ax2.barh(range(len(teams_sorted)), teams_sorted['Goals_Per_Match'])
+                            bars = ax2.barh(range(len(teams_sorted)), teams_sorted['Goals_Per_Match'])
                             ax2.set_yticks(range(len(teams_sorted)))
-                            ax2.set_yticklabels([team[:15] for team in teams_sorted.index])
+                            ax2.set_yticklabels([team[:12] for team in teams_sorted.index], fontsize=8)
                             ax2.set_xlabel('Goals per Match')
-                            ax2.set_title('Goals per Match by Team')
+                            ax2.set_title(f'Goals per Match - All {len(teams_sorted)} Teams')
+                            ax2.grid(axis='x', alpha=0.3)
+                            
+                            # Add value labels on bars
+                            for i, bar in enumerate(bars):
+                                width = bar.get_width()
+                                ax2.text(width + 0.01, bar.get_y() + bar.get_height()/2, 
+                                        f'{width:.2f}', ha='left', va='center', fontsize=7)
                             
                             plt.tight_layout()
                             st.pyplot(fig)
+                            
+                            # Summary statistics
+                            st.subheader("Competition Summary")
+                            col1, col2, col3, col4 = st.columns(4)
+                            with col1:
+                                st.metric("Total Teams", len(team_aggregated))
+                            with col2:
+                                st.metric("Total Goals", int(team_aggregated['Goals'].sum()))
+                            with col3:
+                                st.metric("Avg Goals/Team", f"{team_aggregated['Goals_Per_Match'].mean():.2f}")
+                            with col4:
+                                st.metric("Top Scorer", f"{team_aggregated['Goals'].idxmax()}")
+                                
                     else:
                         st.warning("No valid data found for comparison.")
                         
