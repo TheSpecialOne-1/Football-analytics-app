@@ -157,6 +157,22 @@ def get_available_teams(comp_id, season_id):
                     
     return sorted(list(teams))
 
+# Initialize session state
+if 'possession_data_loaded' not in st.session_state:
+    st.session_state.possession_data_loaded = False
+if 'possession_df' not in st.session_state:
+    st.session_state.possession_df = None
+if 'possession_team_events' not in st.session_state:
+    st.session_state.possession_team_events = None
+if 'possession_possessions' not in st.session_state:
+    st.session_state.possession_possessions = []
+if 'possession_event_types' not in st.session_state:
+    st.session_state.possession_event_types = []
+if 'possession_match_id' not in st.session_state:
+    st.session_state.possession_match_id = ""
+if 'possession_team' not in st.session_state:
+    st.session_state.possession_team = ""
+
 # Sidebar menu
 st.sidebar.title("⚙️ Select Analysis Module")
 option = st.sidebar.radio(
@@ -592,12 +608,13 @@ elif option.endswith("3. Pass Comparison"):
 elif option.endswith("4. Possession Chain Viewer"):
     st.header("🔗 Possession Chain Viewer")
     
-    # User inputs - no default values, manual entry
+    # User inputs
     match_id = st.text_input("Enter Match ID:")
     selected_team = st.text_input("Enter Team Name:")
     
-    if match_id and selected_team:
-        if st.button("🔍 Load Possession Chains"):
+    # Load data button
+    if st.button("🔍 Load Match Data"):
+        if match_id and selected_team:
             try:
                 match_id_int = int(match_id)
                 event_file = os.path.join(events_path, f"{match_id_int}.json")
@@ -609,7 +626,7 @@ elif option.endswith("4. Possession Chain Viewer"):
                         df = safe_json_normalize(events_data)
                         
                         if not df.empty:
-                            st.info(f"Loaded {len(df)} events from match {match_id}")
+                            st.success(f"✅ Loaded {len(df)} events from match {match_id}")
                             
                             # Check if team exists in the data
                             if 'team_name' in df.columns:
@@ -624,151 +641,175 @@ elif option.endswith("4. Possession Chain Viewer"):
                                         possessions = team_events['possession'].unique()
                                         st.info(f"Found {len(possessions)} possessions for {selected_team}")
                                         
-                                        # Event type selection - no defaults
+                                        # Store data in session state
+                                        st.session_state.possession_data_loaded = True
+                                        st.session_state.possession_df = df
+                                        st.session_state.possession_team_events = team_events
+                                        st.session_state.possession_possessions = possessions
+                                        st.session_state.possession_match_id = match_id
+                                        st.session_state.possession_team = selected_team
+                                        
+                                        # Get event types
                                         if 'type_name' in df.columns:
                                             event_types = sorted(df['type_name'].dropna().unique())
-                                            
-                                            selected_events = st.multiselect(
-                                                "Select Event Types to visualize:", 
-                                                options=event_types,
-                                                default=[]  # No default selection
-                                            )
-                                            
-                                            if selected_events:
-                                                try:
-                                                    # Create pitch visualization
-                                                    fig = go.Figure()
-                                                    
-                                                    # Add pitch outline
-                                                    fig.add_shape(
-                                                        type="rect",
-                                                        x0=0, y0=0, x1=120, y1=80,
-                                                        line=dict(color="white", width=2),
-                                                        fillcolor="green",
-                                                        opacity=0.3
-                                                    )
-                                                    
-                                                    # Add center line
-                                                    fig.add_shape(
-                                                        type="line",
-                                                        x0=60, y0=0, x1=60, y1=80,
-                                                        line=dict(color="white", width=2)
-                                                    )
-                                                    
-                                                    # Add center circle
-                                                    fig.add_shape(
-                                                        type="circle",
-                                                        x0=50, y0=35, x1=70, y1=45,
-                                                        line=dict(color="white", width=2)
-                                                    )
-                                                    
-                                                    colors = ['red', 'blue', 'green', 'orange', 'purple', 'yellow', 'pink', 'cyan']
-                                                    chains_plotted = 0
-                                                    
-                                                    # Plot possession chains (limit to first 8 for clarity)
-                                                    for i, possession in enumerate(possessions[:8]):
-                                                        try:
-                                                            poss_events = team_events[
-                                                                (team_events['possession'] == possession) & 
-                                                                (team_events['type_name'].isin(selected_events))
-                                                            ]
-                                                            
-                                                            if not poss_events.empty and 'location' in poss_events.columns:
-                                                                x_coords = []
-                                                                y_coords = []
-                                                                event_info = []
-                                                                
-                                                                for _, event in poss_events.iterrows():
-                                                                    try:
-                                                                        location = event.get('location')
-                                                                        if isinstance(location, list) and len(location) >= 2:
-                                                                            x_coords.append(float(location[0]))
-                                                                            y_coords.append(float(location[1]))
-                                                                            
-                                                                            minute = event.get('minute', '?')
-                                                                            second = event.get('second', '?')
-                                                                            event_type = event.get('type_name', 'Unknown')
-                                                                            player = event.get('player_name', 'Unknown')
-                                                                            
-                                                                            # Format seconds safely
-                                                                            if isinstance(second, (int, float)):
-                                                                                second_str = f"{int(second):02d}"
-                                                                            else:
-                                                                                second_str = str(second)
-                                                                            
-                                                                            event_info.append(f"{minute}:{second_str} - {event_type} by {player}")
-                                                                    except Exception as e:
-                                                                        # Skip problematic events
-                                                                        continue
-                                                                
-                                                                if len(x_coords) > 0:
-                                                                    chains_plotted += 1
-                                                                    color = colors[i % len(colors)]
-                                                                    
-                                                                    fig.add_trace(go.Scatter(
-                                                                        x=x_coords,
-                                                                        y=y_coords,
-                                                                        mode='markers+lines',
-                                                                        name=f'Possession {possession} ({len(x_coords)} events)',
-                                                                        line=dict(color=color, width=3),
-                                                                        marker=dict(color=color, size=8),
-                                                                        text=event_info,
-                                                                        hovertemplate='%{text}<extra></extra>'
-                                                                    ))
-                                                        except Exception as e:
-                                                            # Skip problematic possessions
-                                                            st.warning(f"Error processing possession {possession}: {str(e)}")
-                                                            continue
-                                                    
-                                                    # Update layout
-                                                    fig.update_layout(
-                                                        title=f"Possession Chains for {selected_team} - Match {match_id}<br>{chains_plotted} chains plotted",
-                                                        xaxis_title="Pitch Length (m)",
-                                                        yaxis_title="Pitch Width (m)",
-                                                        xaxis=dict(range=[0, 120], showgrid=True),
-                                                        yaxis=dict(range=[0, 80], showgrid=True),
-                                                        showlegend=True,
-                                                        width=900,
-                                                        height=600,
-                                                        plot_bgcolor='rgba(0,0,0,0)',
-                                                        paper_bgcolor='rgba(0,0,0,0)'
-                                                    )
-                                                    
-                                                    st.plotly_chart(fig, use_container_width=True)
-                                                    
-                                                    if chains_plotted == 0:
-                                                        st.warning("No possession chains with valid location data found for the selected events.")
-                                                
-                                                except Exception as e:
-                                                    st.error(f"Error creating visualization: {str(e)}")
-                                            else:
-                                                st.info("Please select at least one event type to visualize.")
+                                            st.session_state.possession_event_types = event_types
                                         else:
                                             st.warning("No event type information found in the data.")
+                                            st.session_state.possession_data_loaded = False
                                     else:
                                         st.warning(f"Team '{selected_team}' not found in match {match_id}. Available teams: {list(available_teams_in_match)}")
+                                        st.session_state.possession_data_loaded = False
                                 else:
-                                    # Try to use different possession field names
-                                    poss_fields = [col for col in df.columns if 'possess' in col.lower()]
-                                    if poss_fields:
-                                        st.warning(f"'possession' column not found. Found similar columns: {poss_fields}")
-                                    else:
-                                        st.warning("No possession information found in the data.")
+                                    st.warning("No possession information found in the data.")
+                                    st.session_state.possession_data_loaded = False
                             else:
                                 st.warning("No team information found in the event data.")
+                                st.session_state.possession_data_loaded = False
                         else:
                             st.warning("Event data is empty.")
+                            st.session_state.possession_data_loaded = False
                     else:
                         st.error("Could not load event data - file may be corrupted.")
+                        st.session_state.possession_data_loaded = False
                 else:
-                    st.error(f"Event file not found for match {match_id}. File path: {event_file}")
+                    st.error(f"Event file not found for match {match_id}")
+                    st.session_state.possession_data_loaded = False
                     
             except ValueError:
                 st.error("Please enter a valid numeric Match ID.")
+                st.session_state.possession_data_loaded = False
             except Exception as e:
-                st.error(f"Error loading possession chains: {str(e)}")
-    else:
-        st.info("Please enter both Match ID and Team Name to load possession chains.")
+                st.error(f"Error loading match data: {str(e)}")
+                st.session_state.possession_data_loaded = False
+        else:
+            st.warning("Please enter both Match ID and Team Name.")
+            st.session_state.possession_data_loaded = False
+    
+    # Show event selection and visualization if data is loaded
+    if st.session_state.possession_data_loaded and st.session_state.possession_event_types:
+        st.markdown("---")
+        st.subheader("Event Selection & Visualization")
+        
+        # Event type selection
+        selected_events = st.multiselect(
+            "Select Event Types to visualize:", 
+            options=st.session_state.possession_event_types,
+            default=[],
+            key="event_selection"
+        )
+        
+        # Generate visualization button
+        if st.button("🎨 Generate Visualization") or selected_events:
+            if selected_events:
+                try:
+                    team_events = st.session_state.possession_team_events
+                    possessions = st.session_state.possession_possessions
+                    
+                    # Create pitch visualization
+                    fig = go.Figure()
+                    
+                    # Add pitch outline
+                    fig.add_shape(
+                        type="rect",
+                        x0=0, y0=0, x1=120, y1=80,
+                        line=dict(color="white", width=2),
+                        fillcolor="green",
+                        opacity=0.3
+                    )
+                    
+                    # Add center line
+                    fig.add_shape(
+                        type="line",
+                        x0=60, y0=0, x1=60, y1=80,
+                        line=dict(color="white", width=2)
+                    )
+                    
+                    # Add center circle
+                    fig.add_shape(
+                        type="circle",
+                        x0=50, y0=35, x1=70, y1=45,
+                        line=dict(color="white", width=2)
+                    )
+                    
+                    colors = ['red', 'blue', 'green', 'orange', 'purple', 'yellow', 'pink', 'cyan']
+                    chains_plotted = 0
+                    
+                    # Plot possession chains
+                    for i, possession in enumerate(possessions[:8]):
+                        try:
+                            poss_events = team_events[
+                                (team_events['possession'] == possession) & 
+                                (team_events['type_name'].isin(selected_events))
+                            ]
+                            
+                            if not poss_events.empty and 'location' in poss_events.columns:
+                                x_coords = []
+                                y_coords = []
+                                event_info = []
+                                
+                                for _, event in poss_events.iterrows():
+                                    try:
+                                        location = event.get('location')
+                                        if isinstance(location, list) and len(location) >= 2:
+                                            x_coords.append(float(location[0]))
+                                            y_coords.append(float(location[1]))
+                                            
+                                            minute = event.get('minute', '?')
+                                            second = event.get('second', '?')
+                                            event_type = event.get('type_name', 'Unknown')
+                                            player = event.get('player_name', 'Unknown')
+                                            
+                                            # Format seconds safely
+                                            if isinstance(second, (int, float)):
+                                                second_str = f"{int(second):02d}"
+                                            else:
+                                                second_str = str(second)
+                                            
+                                            event_info.append(f"{minute}:{second_str} - {event_type} by {player}")
+                                    except Exception:
+                                        continue
+                                
+                                if len(x_coords) > 0:
+                                    chains_plotted += 1
+                                    color = colors[i % len(colors)]
+                                    
+                                    fig.add_trace(go.Scatter(
+                                        x=x_coords,
+                                        y=y_coords,
+                                        mode='markers+lines',
+                                        name=f'Possession {possession} ({len(x_coords)} events)',
+                                        line=dict(color=color, width=3),
+                                        marker=dict(color=color, size=8),
+                                        text=event_info,
+                                        hovertemplate='%{text}<extra></extra>'
+                                    ))
+                        except Exception as e:
+                            st.warning(f"Error processing possession {possession}: {str(e)}")
+                            continue
+                    
+                    # Update layout
+                    fig.update_layout(
+                        title=f"Possession Chains for {st.session_state.possession_team} - Match {st.session_state.possession_match_id}<br>{chains_plotted} chains plotted",
+                        xaxis_title="Pitch Length (m)",
+                        yaxis_title="Pitch Width (m)",
+                        xaxis=dict(range=[0, 120], showgrid=True),
+                        yaxis=dict(range=[0, 80], showgrid=True),
+                        showlegend=True,
+                        width=900,
+                        height=600,
+                        plot_bgcolor='rgba(0,0,0,0)',
+                        paper_bgcolor='rgba(0,0,0,0)'
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    if chains_plotted == 0:
+                        st.warning("No possession chains with valid location data found for the selected events.")
+                
+                except Exception as e:
+                    st.error(f"Error creating visualization: {str(e)}")
+            else:
+                st.info("Please select at least one event type to visualize.")
 
 # --- Footer ---
 st.markdown("---")
