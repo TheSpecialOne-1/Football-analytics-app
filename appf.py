@@ -10,15 +10,6 @@ import statsmodels.formula.api as smf
 import plotly.graph_objects as go
 import random
 
-# Use relative paths (✅ cloud-ready)
-# --- PATHS ---
-data_path = "data"
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-data_path = os.path.join(BASE_DIR, "data")
-events_path = os.path.join(data_path, "events")
-matches_path = os.path.join(data_path, "matches")
-competitions_path = os.path.join(data_path, "competitions.json")
-
 # Set page config
 st.set_page_config(page_title="Soccer Analysis App", layout="wide")
 st.title("⚽ Soccer Analysis Toolkit")
@@ -47,28 +38,124 @@ html, body, [class*="css"] {
 </style>
 """, unsafe_allow_html=True)
 
-# Helper function to safely load JSON
-def safe_load_json(file_path):
-    """Safely load JSON file with error handling"""
+# Use relative paths (cloud-ready)
+# --- PATHS ---
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+data_path = os.path.join(BASE_DIR, "data")
+events_path = os.path.join(data_path, "events")
+lineups_path = os.path.join(data_path, "lineups") 
+matches_path = os.path.join(data_path, "matches")
+competitions_path = os.path.join(data_path, "competitions.json")
+
+def safe_load_json(file_path, encoding='utf-8'):
+    """Safely load JSON file with multiple encoding attempts and error handling"""
     try:
         if not os.path.exists(file_path):
             return None
-        with open(file_path, encoding='utf-8') as f:
-            return json.load(f)
-    except (json.JSONDecodeError, UnicodeDecodeError, FileNotFoundError) as e:
-        st.error(f"Error loading {file_path}: {str(e)}")
+        
+        # Try different encodings
+        encodings = [encoding, 'utf-8', 'latin1', 'cp1252', 'iso-8859-1']
+        for enc in encodings:
+            try:
+                with open(file_path, 'r', encoding=enc) as f:
+                    content = f.read()
+                    # Clean content - remove any potential problematic characters
+                    content = content.replace('\ufeff', '')  # Remove BOM
+                    content = content.strip()
+                    if content:
+                        return json.loads(content)
+                    return None
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                continue
+        
+        # If all encodings fail, try to read as bytes and clean
+        with open(file_path, 'rb') as f:
+            content = f.read()
+            # Try to decode with error handling
+            content = content.decode('utf-8', errors='ignore')
+            content = content.replace('\ufeff', '').strip()
+            if content:
+                return json.loads(content)
+        
+        return None
+        
+    except Exception as e:
+        st.error(f"Error loading {os.path.basename(file_path)}: {str(e)}")
         return None
 
-# Helper function to safely normalize JSON data
 def safe_json_normalize(data, sep="_"):
     """Safely normalize JSON data with error handling"""
     try:
-        if data is None:
+        if data is None or len(data) == 0:
             return pd.DataFrame()
         return json_normalize(data, sep=sep)
     except Exception as e:
         st.error(f"Error normalizing data: {str(e)}")
         return pd.DataFrame()
+
+def get_team_matches(comp_id, season_id, team_name):
+    """Get match IDs for a specific team"""
+    match_file = os.path.join(matches_path, str(comp_id), f"{season_id}.json")
+    matches_data = safe_load_json(match_file)
+    
+    if matches_data is None:
+        return []
+    
+    match_ids = []
+    for match in matches_data:
+        if isinstance(match, dict) and 'match_id' in match:
+            home_team = ""
+            away_team = ""
+            
+            # Extract home team name
+            if 'home_team' in match:
+                if isinstance(match['home_team'], dict):
+                    home_team = match['home_team'].get('home_team_name', '')
+                elif isinstance(match['home_team'], str):
+                    home_team = match['home_team']
+            
+            # Extract away team name  
+            if 'away_team' in match:
+                if isinstance(match['away_team'], dict):
+                    away_team = match['away_team'].get('away_team_name', '')
+                elif isinstance(match['away_team'], str):
+                    away_team = match['away_team']
+            
+            if team_name.lower() in [home_team.lower(), away_team.lower()]:
+                match_ids.append(match['match_id'])
+                
+    return match_ids
+
+def get_available_teams(comp_id, season_id):
+    """Get list of available teams for the competition/season"""
+    match_file = os.path.join(matches_path, str(comp_id), f"{season_id}.json")
+    matches_data = safe_load_json(match_file)
+    
+    if matches_data is None:
+        return []
+    
+    teams = set()
+    for match in matches_data:
+        if isinstance(match, dict):
+            # Extract home team name
+            if 'home_team' in match:
+                if isinstance(match['home_team'], dict):
+                    home_team = match['home_team'].get('home_team_name', '')
+                elif isinstance(match['home_team'], str):
+                    home_team = match['home_team']
+                if home_team:
+                    teams.add(home_team)
+            
+            # Extract away team name  
+            if 'away_team' in match:
+                if isinstance(match['away_team'], dict):
+                    away_team = match['away_team'].get('away_team_name', '')
+                elif isinstance(match['away_team'], str):
+                    away_team = match['away_team']
+                if away_team:
+                    teams.add(away_team)
+                    
+    return sorted(list(teams))
 
 # Sidebar menu
 st.sidebar.title("⚙️ Select Analysis Module")
@@ -93,310 +180,316 @@ if option.endswith("1. Load Match Data"):
         comp_df = pd.DataFrame(comps)
         st.subheader("Available Competitions")
         
-        # Check if required columns exist
-        required_cols = ['competition_id', 'season_id', 'competition_name', 'season_name']
-        existing_cols = [col for col in required_cols if col in comp_df.columns]
-        if existing_cols:
-            st.dataframe(comp_df[existing_cols])
+        # Display competitions in a nice format
+        display_cols = ['competition_id', 'season_id', 'competition_name', 'season_name', 'country_name']
+        available_cols = [col for col in display_cols if col in comp_df.columns]
+        
+        if available_cols:
+            st.dataframe(comp_df[available_cols].head(10))
         else:
-            st.dataframe(comp_df)
+            st.dataframe(comp_df.head())
         
-        comp_id = st.number_input("Enter Competition ID:", min_value=0, step=1)
-        season_id = st.number_input("Enter Season ID:", min_value=0, step=1)
+        # User inputs
+        comp_id = st.number_input("Enter Competition ID:", min_value=0, step=1, value=43)
+        season_id = st.number_input("Enter Season ID:", min_value=0, step=1, value=3)
         
-        match_file = os.path.join(matches_path, f"{comp_id}", f"{season_id}.json")
-        if os.path.exists(match_file):
-            matches = safe_load_json(match_file)
-            if matches is not None:
-                match_df = safe_json_normalize(matches, sep="_")
-                if not match_df.empty:
-                    st.subheader("Match Fixtures")
-                    # Display available columns
-                    available_cols = [col for col in match_df.columns if 'match_id' in col or 'team' in col or 'date' in col]
-                    if available_cols:
-                        st.dataframe(match_df[available_cols[:5]])  # Show first 5 relevant columns
-                    else:
-                        st.dataframe(match_df.head())
+        if st.button("🔍 Load Matches"):
+            match_file = os.path.join(matches_path, str(comp_id), f"{season_id}.json")
+            if os.path.exists(match_file):
+                matches = safe_load_json(match_file)
+                if matches is not None:
+                    st.success(f"✅ Found {len(matches)} matches")
+                    
+                    # Show sample matches
+                    if matches:
+                        sample_match = matches[0]
+                        st.subheader("Sample Match Data:")
+                        st.json(sample_match)
+                        
+                        # Show available teams
+                        teams = get_available_teams(comp_id, season_id)
+                        if teams:
+                            st.subheader("Available Teams:")
+                            st.write(", ".join(teams[:10]))  # Show first 10 teams
+                        
                 else:
-                    st.warning("❌ No match data found or data format error.")
+                    st.error("❌ Error loading match file.")
             else:
-                st.warning("❌ Error loading match file.")
-        else:
-            st.warning("❌ Match file not found for this competition/season.")
+                st.warning("❌ Match file not found for this competition/season.")
     else:
-        st.error("❌ Could not load competitions file. Please check if the data directory exists.")
+        st.error("❌ Could not load competitions file.")
 
 # --- MODULE 2: Danger Pass Heatmap ---
 elif option.endswith("2. Danger Pass Heatmap"):
     st.header("🔥 Danger Pass Heatmap")
     st.markdown("Visualize key passes that occur before a shot attempt.")
     
-    comp_id = st.number_input("Enter Competition ID:", min_value=0, step=1, key="comp2")
-    season_id = st.number_input("Enter Season ID:", min_value=0, step=1, key="season2")
-    team_required = st.text_input("Enter Team Name:")
+    comp_id = st.number_input("Enter Competition ID:", min_value=0, step=1, value=43, key="comp2")
+    season_id = st.number_input("Enter Season ID:", min_value=0, step=1, value=3, key="season2")
     
-    def load_matches(cid, sid):
-        """Load matches for given competition and season"""
-        path = os.path.join(matches_path, f"{cid}", f"{sid}.json")
-        return safe_load_json(path)
+    # Get available teams for this competition/season
+    available_teams = get_available_teams(comp_id, season_id)
     
-    def get_passes(match_id, team):
-        """Get passes for a specific match and team"""
-        path = os.path.join(events_path, f"{match_id}.json")
-        data = safe_load_json(path)
-        if data is None:
-            return pd.DataFrame(), pd.DataFrame()
+    if available_teams:
+        st.subheader("Available Teams:")
+        team_cols = st.columns(3)
+        for i, team in enumerate(available_teams[:15]):  # Show first 15 teams
+            with team_cols[i % 3]:
+                st.write(f"• {team}")
+                
+        team_required = st.selectbox("Select Team:", options=[""] + available_teams)
         
-        df = safe_json_normalize(data, sep="_")
-        if df.empty:
-            return pd.DataFrame(), pd.DataFrame()
-        
-        df = df.assign(match_id=match_id)
-        
-        # Check if team_name column exists
-        if 'team_name' in df.columns:
-            df = df[df['team_name'] == team]
-        else:
-            # Try alternative column names
-            team_cols = [col for col in df.columns if 'team' in col.lower() and 'name' in col.lower()]
-            if team_cols:
-                df = df[df[team_cols[0]] == team]
-        
-        # Get passes
-        if 'type_name' in df.columns:
-            passes = df[df['type_name'] == 'Pass']
-            if 'id' in passes.columns:
-                passes = passes.set_index('id')
-        else:
-            passes = pd.DataFrame()
-        
-        return df, passes
-    
-    if st.button("🎯 Generate Heatmap"):
-        if not team_required:
-            st.warning("Please enter a team name.")
-        else:
+        if team_required and st.button("🎯 Generate Heatmap"):
             try:
-                matches = load_matches(comp_id, season_id)
-                if matches is None:
-                    st.error("Could not load matches for this competition/season.")
+                match_ids = get_team_matches(comp_id, season_id, team_required)
+                
+                if not match_ids:
+                    st.warning(f"No matches found for team: {team_required}")
                 else:
-                    # Find match IDs for the team
-                    match_ids = []
-                    for m in matches:
-                        if isinstance(m, dict):
-                            # Check various possible team name fields
-                            home_team = ""
-                            away_team = ""
-                            
-                            if 'home_team' in m:
-                                if isinstance(m['home_team'], dict) and 'home_team_name' in m['home_team']:
-                                    home_team = m['home_team']['home_team_name']
-                                elif isinstance(m['home_team'], str):
-                                    home_team = m['home_team']
-                            
-                            if 'away_team' in m:
-                                if isinstance(m['away_team'], dict) and 'away_team_name' in m['away_team']:
-                                    away_team = m['away_team']['away_team_name']
-                                elif isinstance(m['away_team'], str):
-                                    away_team = m['away_team']
-                            
-                            if team_required in [home_team, away_team] and 'match_id' in m:
-                                match_ids.append(m['match_id'])
+                    st.info(f"Processing {len(match_ids)} matches for {team_required}")
                     
-                    if not match_ids:
-                        st.warning(f"No matches found for team: {team_required}")
-                    else:
-                        all_danger_passes = []
+                    all_danger_passes = []
+                    processed_matches = 0
+                    
+                    for match_id in match_ids[:5]:  # Limit to first 5 matches for performance
+                        event_file = os.path.join(events_path, f"{match_id}.json")
                         
-                        for match_id in match_ids:
-                            df, passes = get_passes(match_id, team_required)
+                        if not os.path.exists(event_file):
+                            st.warning(f"Event file not found for match {match_id}")
+                            continue
                             
-                            if df.empty or passes.empty:
-                                continue
+                        events_data = safe_load_json(event_file)
+                        if events_data is None:
+                            continue
                             
-                            # Get shot times (if any shots exist)
-                            if 'type_name' in df.columns:
-                                shots = df[df['type_name'] == 'Shot']
-                                if not shots.empty and 'minute' in shots.columns and 'second' in shots.columns:
-                                    shot_times = (shots['minute'] * 60 + shots['second']).tolist()
-                                else:
-                                    shot_times = []
-                            else:
-                                shot_times = []
-                            
-                            if shot_times and not passes.empty:
-                                shot_window = 15
-                                shot_start = [max(0, st - shot_window) for st in shot_times]
-                                
-                                if 'minute' in passes.columns and 'second' in passes.columns:
-                                    pass_times = (passes['minute'] * 60 + passes['second']).tolist()
-                                    pass_to_shot = [any(start < pt < st for start, st in zip(shot_start, shot_times)) for pt in pass_times]
-                                    
-                                    # Check for corner passes
-                                    if 'pass_type_name' in passes.columns:
-                                        is_corner = passes['pass_type_name'] == 'Corner'
-                                        is_corner = is_corner.fillna(False)
-                                    else:
-                                        is_corner = pd.Series([False] * len(passes), index=passes.index)
-                                    
-                                    danger_passes = passes[np.logical_and(pass_to_shot, ~is_corner)]
-                                    all_danger_passes.append(danger_passes)
+                        df = safe_json_normalize(events_data)
+                        if df.empty:
+                            continue
                         
-                        if all_danger_passes:
-                            all_passes = pd.concat(all_danger_passes, ignore_index=True)
+                        processed_matches += 1
+                        
+                        # Filter for the team
+                        team_filter = df['team_name'] == team_required if 'team_name' in df.columns else pd.Series([False] * len(df))
+                        team_events = df[team_filter]
+                        
+                        if team_events.empty:
+                            continue
+                        
+                        # Get passes and shots
+                        passes = team_events[team_events['type_name'] == 'Pass'] if 'type_name' in team_events.columns else pd.DataFrame()
+                        shots = team_events[team_events['type_name'] == 'Shot'] if 'type_name' in team_events.columns else pd.DataFrame()
+                        
+                        if passes.empty or shots.empty:
+                            continue
+                        
+                        # Calculate danger passes (passes 15 seconds before shots)
+                        shot_times = []
+                        if 'minute' in shots.columns and 'second' in shots.columns:
+                            shot_times = (shots['minute'] * 60 + shots['second']).tolist()
+                        
+                        if shot_times and not passes.empty:
+                            shot_window = 15
+                            danger_passes = []
                             
-                            if not all_passes.empty and 'location' in all_passes.columns:
-                                pitchLengthX, pitchWidthY = 120, 80
-                                
-                                # Extract coordinates safely
-                                valid_locations = all_passes['location'].dropna()
-                                x_coords = []
-                                y_coords = []
-                                
-                                for loc in valid_locations:
-                                    if isinstance(loc, list) and len(loc) >= 2:
-                                        x_coords.append(loc[0])
-                                        y_coords.append(pitchWidthY - loc[1])
-                                
-                                if x_coords and y_coords:
-                                    H_Pass, _, _ = np.histogram2d(y_coords, x_coords, bins=5, 
-                                                                range=[[0, pitchWidthY], [0, pitchLengthX]])
+                            for _, pass_row in passes.iterrows():
+                                if 'minute' in pass_row and 'second' in pass_row:
+                                    pass_time = pass_row['minute'] * 60 + pass_row['second']
                                     
-                                    fig, ax = plt.subplots(figsize=(10, 7))
-                                    pos = ax.imshow(H_Pass / len(match_ids), extent=[0, 120, 0, 80], 
-                                                  aspect='auto', cmap=plt.cm.Reds)
-                                    fig.colorbar(pos, ax=ax)
-                                    ax.set_title(f"Danger Pass Heatmap: {team_required}")
-                                    ax.set_xlim((-1, 121))
-                                    ax.set_ylim((83, -3))
-                                    st.pyplot(fig)
-                                else:
-                                    st.warning("No valid location data found for passes.")
-                            else:
-                                st.warning("No location data available in passes.")
+                                    # Check if pass is within 15 seconds before any shot
+                                    for shot_time in shot_times:
+                                        if shot_time - shot_window <= pass_time <= shot_time:
+                                            # Skip corner passes
+                                            is_corner = pass_row.get('pass_type_name') == 'Corner'
+                                            if not is_corner and 'location' in pass_row and pass_row['location'] is not None:
+                                                danger_passes.append(pass_row)
+                                            break
+                            
+                            if danger_passes:
+                                all_danger_passes.extend(danger_passes)
+                    
+                    st.info(f"Processed {processed_matches} matches")
+                    
+                    if all_danger_passes:
+                        # Create heatmap
+                        pitchLengthX, pitchWidthY = 120, 80
+                        x_coords = []
+                        y_coords = []
+                        
+                        for pass_data in all_danger_passes:
+                            location = pass_data.get('location')
+                            if isinstance(location, list) and len(location) >= 2:
+                                x_coords.append(location[0])
+                                y_coords.append(pitchWidthY - location[1])  # Flip Y-axis
+                        
+                        if x_coords and y_coords:
+                            fig, ax = plt.subplots(figsize=(12, 8))
+                            
+                            # Create heatmap
+                            H, xedges, yedges = np.histogram2d(x_coords, y_coords, bins=10, 
+                                                             range=[[0, pitchLengthX], [0, pitchWidthY]])
+                            
+                            # Plot heatmap
+                            extent = [0, pitchLengthX, 0, pitchWidthY]
+                            im = ax.imshow(H.T, extent=extent, origin='lower', cmap='Reds', alpha=0.8)
+                            
+                            # Add pitch lines
+                            ax.plot([0, pitchLengthX], [pitchWidthY/2, pitchWidthY/2], 'white', linewidth=2)  # Halfway line
+                            ax.plot([pitchLengthX/2, pitchLengthX/2], [0, pitchWidthY], 'white', linewidth=2)  # Center line
+                            
+                            # Add goals
+                            goal_width = 7.32
+                            goal_y_start = (pitchWidthY - goal_width) / 2
+                            goal_y_end = (pitchWidthY + goal_width) / 2
+                            ax.plot([0, 0], [goal_y_start, goal_y_end], 'white', linewidth=4)  # Left goal
+                            ax.plot([pitchLengthX, pitchLengthX], [goal_y_start, goal_y_end], 'white', linewidth=4)  # Right goal
+                            
+                            ax.set_title(f"Danger Pass Heatmap: {team_required}\n({len(all_danger_passes)} danger passes from {processed_matches} matches)", 
+                                        fontsize=14, color='white')
+                            ax.set_xlabel("Pitch Length (m)", color='white')
+                            ax.set_ylabel("Pitch Width (m)", color='white')
+                            ax.set_xlim(0, pitchLengthX)
+                            ax.set_ylim(0, pitchWidthY)
+                            ax.set_facecolor('darkgreen')
+                            
+                            # Add colorbar
+                            cbar = plt.colorbar(im, ax=ax)
+                            cbar.set_label('Danger Pass Density', color='white')
+                            cbar.ax.yaxis.set_tick_params(color='white')
+                            cbar.ax.yaxis.label.set_color('white')
+                            
+                            plt.tight_layout()
+                            st.pyplot(fig)
+                            
                         else:
-                            st.warning("No danger passes found for the selected team.")
-                            
+                            st.warning("No valid location data found for danger passes.")
+                    else:
+                        st.warning("No danger passes found for the selected team and matches.")
+                        
             except Exception as e:
                 st.error(f"Error generating heatmap: {str(e)}")
+    else:
+        st.warning("No teams found for the selected competition/season.")
 
 # --- MODULE 3: Pass Comparison ---
 elif option.endswith("3. Pass Comparison"):
     st.header("📊 Team Pass Comparison")
     
-    comp_id = st.number_input("Enter Competition ID:", min_value=0, step=1, key="comp3")
-    season_id = st.number_input("Enter Season ID:", min_value=0, step=1, key="season3")
+    comp_id = st.number_input("Enter Competition ID:", min_value=0, step=1, value=43, key="comp3")
+    season_id = st.number_input("Enter Season ID:", min_value=0, step=1, value=3, key="season3")
     
     if st.button("📈 Compare Teams"):
         try:
-            # Load matches
-            match_file = os.path.join(matches_path, f"{comp_id}", f"{season_id}.json")
-            matches = safe_load_json(match_file)
+            match_file = os.path.join(matches_path, str(comp_id), f"{season_id}.json")
+            matches_data = safe_load_json(match_file)
             
-            if matches is None:
+            if matches_data is None:
                 st.error("Could not load matches for this competition/season.")
             else:
-                # Initialize data structures
-                teams = []
-                passshot_data = []
+                team_stats = []
+                processed_matches = 0
                 
                 # Process each match
-                for match in matches:
+                for match in matches_data[:10]:  # Limit to first 10 matches for performance
                     if not isinstance(match, dict) or 'match_id' not in match:
                         continue
                     
                     match_id = match['match_id']
-                    file_path = os.path.join(events_path, f"{match_id}.json")
+                    event_file = os.path.join(events_path, f"{match_id}.json")
                     
-                    data = safe_load_json(file_path)
-                    if data is None:
+                    if not os.path.exists(event_file):
+                        continue
+                        
+                    events_data = safe_load_json(event_file)
+                    if events_data is None:
                         continue
                     
-                    dfall = safe_json_normalize(data, sep="_")
-                    if dfall.empty:
+                    df = safe_json_normalize(events_data)
+                    if df.empty or 'team_name' not in df.columns or 'type_name' not in df.columns:
                         continue
                     
-                    dfall = dfall.assign(match_id=match_id)
+                    processed_matches += 1
                     
-                    # Extract team names
+                    # Extract team names from match
                     home_team = ""
                     away_team = ""
                     
-                    if 'home_team' in match:
-                        if isinstance(match['home_team'], dict) and 'home_team_name' in match['home_team']:
-                            home_team = match['home_team']['home_team_name']
-                        elif isinstance(match['home_team'], str):
-                            home_team = match['home_team']
-                    
-                    if 'away_team' in match:
-                        if isinstance(match['away_team'], dict) and 'away_team_name' in match['away_team']:
-                            away_team = match['away_team']['away_team_name']
-                        elif isinstance(match['away_team'], str):
-                            away_team = match['away_team']
-                    
-                    if home_team not in teams and home_team:
-                        teams.append(home_team)
-                    if away_team not in teams and away_team:
-                        teams.append(away_team)
+                    if 'home_team' in match and isinstance(match['home_team'], dict):
+                        home_team = match['home_team'].get('home_team_name', '')
+                    if 'away_team' in match and isinstance(match['away_team'], dict):
+                        away_team = match['away_team'].get('away_team_name', '')
                     
                     # Process both teams
-                    for theteam in [home_team, away_team]:
-                        if not theteam:
+                    for team in [home_team, away_team]:
+                        if not team:
                             continue
                         
-                        # Filter team data
-                        if 'team_name' in dfall.columns:
-                            team_actions = dfall['team_name'] == theteam
-                        else:
+                        team_events = df[df['team_name'] == team]
+                        
+                        if team_events.empty:
                             continue
                         
-                        df = dfall[team_actions]
+                        passes = len(team_events[team_events['type_name'] == 'Pass'])
+                        shots = len(team_events[team_events['type_name'] == 'Shot'])
                         
-                        if 'type_name' in df.columns:
-                            passes_match = df[df['type_name'] == 'Pass']
-                            shots_match = df[df['type_name'] == 'Shot']
-                        else:
-                            passes_match = pd.DataFrame()
-                            shots_match = pd.DataFrame()
+                        # Get goals from match data
+                        home_score = match.get('home_score', 0) if isinstance(match.get('home_score'), (int, float)) else 0
+                        away_score = match.get('away_score', 0) if isinstance(match.get('away_score'), (int, float)) else 0
                         
-                        # Get scores
-                        home_score = match.get('home_score', 0) if isinstance(match.get('home_score'), int) else 0
-                        away_score = match.get('away_score', 0) if isinstance(match.get('away_score'), int) else 0
+                        goals = home_score if team == home_team else away_score
                         
-                        team_score = home_score if theteam == home_team else away_score
-                        
-                        passshot_data.append({
-                            "Team": theteam,
-                            "Passes": len(passes_match),
-                            "Shots": len(shots_match),
-                            "Goals": team_score
+                        team_stats.append({
+                            "Team": team,
+                            "Match_ID": match_id,
+                            "Passes": passes,
+                            "Shots": shots,
+                            "Goals": goals
                         })
                 
-                if passshot_data:
-                    # Create DataFrame
-                    passshot_df = pd.DataFrame(passshot_data)
-                    st.dataframe(passshot_df)
+                if team_stats:
+                    df_stats = pd.DataFrame(team_stats)
                     
-                    # Create visualization if we have data
-                    if len(passshot_df) > 1:
-                        fig, ax = plt.subplots(figsize=(10, 6))
-                        ax.scatter(passshot_df['Passes'], passshot_df['Shots'], alpha=0.7)
-                        ax.set_xlabel('Passes')
-                        ax.set_ylabel('Shots')
-                        ax.set_title('Passes vs Shots')
+                    # Aggregate by team
+                    team_aggregated = df_stats.groupby('Team').agg({
+                        'Passes': 'sum',
+                        'Shots': 'sum', 
+                        'Goals': 'sum',
+                        'Match_ID': 'count'
+                    }).rename(columns={'Match_ID': 'Matches_Played'})
+                    
+                    # Calculate averages
+                    team_aggregated['Avg_Passes'] = team_aggregated['Passes'] / team_aggregated['Matches_Played']
+                    team_aggregated['Avg_Shots'] = team_aggregated['Shots'] / team_aggregated['Matches_Played']
+                    team_aggregated['Goals_Per_Match'] = team_aggregated['Goals'] / team_aggregated['Matches_Played']
+                    
+                    st.subheader(f"Team Comparison ({processed_matches} matches processed)")
+                    st.dataframe(team_aggregated.round(2))
+                    
+                    # Create visualization
+                    if len(team_aggregated) > 1:
+                        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
                         
-                        # Add trend line if possible
-                        if len(passshot_df) > 2:
-                            try:
-                                z = np.polyfit(passshot_df['Passes'], passshot_df['Shots'], 1)
-                                p = np.poly1d(z)
-                                ax.plot(passshot_df['Passes'], p(passshot_df['Passes']), "r--", alpha=0.8)
-                            except:
-                                pass
+                        # Passes vs Shots scatter plot
+                        ax1.scatter(team_aggregated['Avg_Passes'], team_aggregated['Avg_Shots'], 
+                                   s=team_aggregated['Goals']*50+50, alpha=0.7, c=team_aggregated['Goals'], cmap='viridis')
+                        ax1.set_xlabel('Average Passes per Match')
+                        ax1.set_ylabel('Average Shots per Match')
+                        ax1.set_title('Passes vs Shots (bubble size = total goals)')
                         
+                        # Add team labels
+                        for team, row in team_aggregated.iterrows():
+                            ax1.annotate(team[:10], (row['Avg_Passes'], row['Avg_Shots']), 
+                                        xytext=(5, 5), textcoords='offset points', fontsize=8)
+                        
+                        # Goals per match bar chart
+                        teams_sorted = team_aggregated.sort_values('Goals_Per_Match', ascending=True)
+                        ax2.barh(range(len(teams_sorted)), teams_sorted['Goals_Per_Match'])
+                        ax2.set_yticks(range(len(teams_sorted)))
+                        ax2.set_yticklabels([team[:15] for team in teams_sorted.index])
+                        ax2.set_xlabel('Goals per Match')
+                        ax2.set_title('Goals per Match by Team')
+                        
+                        plt.tight_layout()
                         st.pyplot(fig)
-                    
                 else:
                     st.warning("No valid data found for comparison.")
                     
@@ -407,99 +500,157 @@ elif option.endswith("3. Pass Comparison"):
 elif option.endswith("4. Possession Chain Viewer"):
     st.header("🔗 Possession Chain Viewer")
     
-    match_id = st.text_input("Enter Match ID:")
-    selected_team = st.text_input("Enter team to show possession chains for:")
+    # Available match IDs (from the repo structure we can see)
+    available_matches = [8658, 8657, 8656, 8655, 8652, 8651, 8650, 8649, 7586, 7585, 7584, 7583]
     
-    if match_id and selected_team:
-        file_path = os.path.join(events_path, f"{match_id}.json")
-        data = safe_load_json(file_path)
+    match_id = st.selectbox("Select Match ID:", options=available_matches, index=0)
+    
+    # Load match info to show teams
+    if match_id:
+        # Find the match in competitions to get team names
+        for comp_folder in os.listdir(matches_path):
+            comp_path = os.path.join(matches_path, comp_folder)
+            if os.path.isdir(comp_path):
+                for season_file in os.listdir(comp_path):
+                    if season_file.endswith('.json'):
+                        season_matches = safe_load_json(os.path.join(comp_path, season_file))
+                        if season_matches:
+                            for match in season_matches:
+                                if isinstance(match, dict) and match.get('match_id') == match_id:
+                                    home_team = ""
+                                    away_team = ""
+                                    if 'home_team' in match and isinstance(match['home_team'], dict):
+                                        home_team = match['home_team'].get('home_team_name', '')
+                                    if 'away_team' in match and isinstance(match['away_team'], dict):
+                                        away_team = match['away_team'].get('away_team_name', '')
+                                    
+                                    if home_team and away_team:
+                                        st.info(f"Match: {home_team} vs {away_team}")
+                                        available_teams = [home_team, away_team]
+                                        selected_team = st.selectbox("Select Team:", options=available_teams)
+                                        break
+    else:
+        selected_team = st.text_input("Enter team name:")
+    
+    if match_id and 'selected_team' in locals() and selected_team:
+        event_file = os.path.join(events_path, f"{match_id}.json")
         
-        if data is not None:
-            match_events = safe_json_normalize(data, sep="_")
+        if os.path.exists(event_file):
+            events_data = safe_load_json(event_file)
             
-            if not match_events.empty:
-                # List all unique event types used
-                if 'type_name' in match_events.columns:
-                    all_event_types = match_events['type_name'].dropna().unique()
-                    all_event_types = sorted(all_event_types)
+            if events_data is not None:
+                df = safe_json_normalize(events_data)
+                
+                if not df.empty and 'team_name' in df.columns:
+                    # Get team possessions
+                    team_events = df[df['team_name'] == selected_team]
                     
-                    # Event type selection
-                    st.subheader("Select Event Types to Include")
-                    selected_event_types = st.multiselect("Choose event types:", all_event_types)
-                    
-                    if selected_event_types:
-                        # Filter possessions for the selected team
-                        if 'possession_team_name' in match_events.columns:
-                            team_possessions = match_events[
-                                match_events['possession_team_name'] == selected_team
-                            ]['possession'].unique() if 'possession' in match_events.columns else []
-                        else:
-                            team_possessions = []
+                    if not team_events.empty and 'possession' in team_events.columns:
+                        possessions = team_events['possession'].unique()
+                        st.info(f"Found {len(possessions)} possessions for {selected_team}")
                         
-                        if len(team_possessions) > 0:
-                            # Create plotly figure
-                            fig = go.Figure()
-                            fig.update_layout(
-                                width=900,
-                                height=600,
-                                autosize=False,
-                                plot_bgcolor="#0c1a2b",
-                                paper_bgcolor="#0c1a2b",
+                        # Event type selection
+                        if 'type_name' in df.columns:
+                            event_types = sorted(df['type_name'].dropna().unique())
+                            selected_events = st.multiselect(
+                                "Select Event Types:", 
+                                options=event_types,
+                                default=['Pass', 'Shot'] if all(x in event_types for x in ['Pass', 'Shot']) else event_types[:3]
                             )
                             
-                            fig.update_xaxes(range=[-0.03, 1.03], visible=False)
-                            fig.update_yaxes(range=[-0.03, 1.03], visible=False)
-                            
-                            # Draw pitch outline
-                            fig.add_shape(type="rect", x0=0, y0=0, x1=1, y1=1, line=dict(color="white"))
-                            fig.add_shape(type="line", x0=0.5, y0=0, x1=0.5, y1=1, line=dict(color="white"))
-                            
-                            # Add possession chains
-                            for possession in team_possessions[:5]:  # Limit to first 5 possessions
-                                df = match_events[match_events['possession'] == possession]
-                                df = df[df['type_name'].isin(selected_event_types)]
+                            if selected_events:
+                                # Create pitch visualization
+                                fig = go.Figure()
                                 
-                                chain_x, chain_y, text, times = [], [], [], []
+                                # Add pitch outline
+                                fig.add_shape(
+                                    type="rect",
+                                    x0=0, y0=0, x1=120, y1=80,
+                                    line=dict(color="white", width=2),
+                                    fillcolor="green",
+                                    opacity=0.3
+                                )
                                 
-                                for _, row in df.iterrows():
-                                    loc = row.get('location')
-                                    if isinstance(loc, list) and len(loc) >= 2:
-                                        x = round((loc[0] * (100 / 120)) / 100, 3)
-                                        y = round(((80 - loc[1]) * (100 / 80)) / 100, 3)
+                                # Add center line
+                                fig.add_shape(
+                                    type="line",
+                                    x0=60, y0=0, x1=60, y1=80,
+                                    line=dict(color="white", width=2)
+                                )
+                                
+                                # Add center circle
+                                fig.add_shape(
+                                    type="circle",
+                                    x0=50, y0=35, x1=70, y1=45,
+                                    line=dict(color="white", width=2)
+                                )
+                                
+                                colors = ['red', 'blue', 'green', 'orange', 'purple']
+                                
+                                # Plot possession chains (limit to first 5 for clarity)
+                                for i, possession in enumerate(possessions[:5]):
+                                    poss_events = team_events[
+                                        (team_events['possession'] == possession) & 
+                                        (team_events['type_name'].isin(selected_events))
+                                    ]
+                                    
+                                    if not poss_events.empty and 'location' in poss_events.columns:
+                                        x_coords = []
+                                        y_coords = []
+                                        event_info = []
                                         
-                                        chain_x.append(x)
-                                        chain_y.append(y)
-                                        text.append(row.get('type_name', 'Unknown'))
-                                        times.append(f"{row.get('minute', 0)}:{row.get('second', 0)}")
+                                        for _, event in poss_events.iterrows():
+                                            location = event.get('location')
+                                            if isinstance(location, list) and len(location) >= 2:
+                                                x_coords.append(location[0])
+                                                y_coords.append(location[1])
+                                                minute = event.get('minute', '?')
+                                                second = event.get('second', '?')
+                                                event_type = event.get('type_name', 'Unknown')
+                                                event_info.append(f"{minute}:{second:02d} - {event_type}")
+                                        
+                                        if x_coords:
+                                            color = colors[i % len(colors)]
+                                            fig.add_trace(go.Scatter(
+                                                x=x_coords,
+                                                y=y_coords,
+                                                mode='markers+lines',
+                                                name=f'Possession {possession}',
+                                                line=dict(color=color, width=3),
+                                                marker=dict(color=color, size=8),
+                                                text=event_info,
+                                                hovertemplate='%{text}<extra></extra>'
+                                            ))
                                 
-                                if chain_x:
-                                    fig.add_trace(go.Scatter(
-                                        x=chain_x,
-                                        y=chain_y,
-                                        mode='markers+lines',
-                                        text=text,
-                                        hovertemplate="Time: %{hovertext}<br>Event: %{text}",
-                                        hovertext=times,
-                                        marker=dict(size=8),
-                                        name=f"Possession {possession}"
-                                    ))
-                            
-                            fig.update_layout(
-                                title=f"Possession Chains for {selected_team}",
-                                title_font=dict(color='white')
-                            )
-                            st.plotly_chart(fig, use_container_width=True)
+                                # Update layout
+                                fig.update_layout(
+                                    title=f"Possession Chains for {selected_team} - Match {match_id}",
+                                    xaxis_title="Pitch Length (m)",
+                                    yaxis_title="Pitch Width (m)",
+                                    xaxis=dict(range=[0, 120], showgrid=True),
+                                    yaxis=dict(range=[0, 80], showgrid=True),
+                                    showlegend=True,
+                                    width=900,
+                                    height=600,
+                                    plot_bgcolor='rgba(0,0,0,0)',
+                                    paper_bgcolor='rgba(0,0,0,0)'
+                                )
+                                
+                                st.plotly_chart(fig, use_container_width=True)
+                            else:
+                                st.info("Please select at least one event type.")
                         else:
-                            st.warning(f"No possessions found for team: {selected_team}")
+                            st.warning("No event type information found.")
                     else:
-                        st.info("Please select at least one event type")
+                        st.warning(f"No possession data found for {selected_team}")
                 else:
-                    st.warning("No event type information found in match data.")
+                    st.warning("No valid event data found.")
             else:
-                st.warning("No events data available for this match.")
+                st.error("Could not load event data.")
         else:
-            st.error(f"Match file not found: {file_path}")
+            st.error(f"Event file not found for match {match_id}")
 
 # --- Footer ---
 st.markdown("---")
 st.markdown("⚽ **Soccer Analysis Toolkit** - Built with Streamlit")
+st.markdown("*Note: This app processes StatsBomb football data in JSON format.*")
