@@ -139,106 +139,112 @@ if 'show_register' not in st.session_state:
     st.session_state.show_register = False
 
 # Authentication UI functions
+# --- LOGIN ---
 def show_login():
-    st.title("🔐 Login to Soccer Analysis Toolkit")
+    st.title("🔐 Login")
+    login_mode = st.radio("Login with", ["Email", "Username"], horizontal=True, key="login_mode")
 
-    with st.form("login_form"):
-        st.subheader("Login")
-        username_or_email = st.text_input("Username or Email")
+    with st.form("login_form", clear_on_submit=False):
+        if login_mode == "Email":
+            identifier = st.text_input("Email", placeholder="name@example.com")
+        else:
+            identifier = st.text_input("Username", placeholder="your_username")
         password = st.text_input("Password", type="password")
-        login_button = st.form_submit_button("Login")
+        submit = st.form_submit_button("Login")
 
-        if login_button:
-            if username_or_email and password:
-                success, user_data = login_user(username_or_email, password)
-                if success:
-                    st.session_state.logged_in = True
-                    st.session_state.user_data = user_data
-                    st.success("Login successful!")
-                    st.rerun()
-                else:
-                    st.error("Invalid credentials!")
-            else:
-                st.error("Please fill in all fields")
+    if submit:
+        if login_mode == "Email":
+            if not validate_email(identifier):
+                st.error("Please enter a valid email address")
+                return
+            success, user_data = login_user(identifier, password)  # login_user already detects '@'
+        else:
+            success, user_data = login_user(identifier, password)
 
-    st.markdown("---")
-    if st.button("Create New Account"):
+        if success:
+            st.session_state.logged_in = True
+            st.session_state.user_data = user_data
+            st.success("Welcome back!")
+            st.rerun()
+        else:
+            st.error("Invalid credentials")
+
+    st.caption("No account yet?")
+    if st.button("Create an account"):
         st.session_state.show_register = True
         st.rerun()
 
+# --- REGISTER ---
 def show_register():
     st.title("📝 Create Account")
+    registered_now = False
 
-    with st.form("register_form"):
-        st.subheader("Registration Form")
-
+    with st.form("register_form", clear_on_submit=False):
         col1, col2 = st.columns(2)
-
         with col1:
             username = st.text_input("Username*")
             email = st.text_input("Email*")
             password = st.text_input("Password*", type="password")
-            confirm_password = st.text_input("Confirm Password*", type="password")
-
+            confirm = st.text_input("Confirm Password*", type="password")
         with col2:
             full_name = st.text_input("Full Name*")
-            nationality = st.selectbox("Nationality*", [
-                "", "Afghanistan", "Albania", "Algeria", "Argentina", "Australia", 
-                "Austria", "Bangladesh", "Belgium", "Brazil", "Canada", "China", 
-                "Denmark", "Egypt", "Finland", "France", "Germany", "India", 
-                "Indonesia", "Iran", "Iraq", "Italy", "Japan", "Mexico", 
-                "Netherlands", "Norway", "Pakistan", "Poland", "Portugal", 
-                "Russia", "Saudi Arabia", "South Africa", "Spain", "Sweden", 
-                "Switzerland", "Turkey", "United Kingdom", "United States", "Other"
-            ])
-            phone_number = st.text_input("Phone Number*", placeholder="+1234567890")
-            date_of_birth = st.date_input("Date of Birth", 
-                                        max_value=datetime.now().date(),
-                                        value=datetime(1990, 1, 1).date())
+            nationality = st.selectbox(
+                "Nationality*",
+                ["", "Afghanistan", "Albania", "Algeria", "Argentina", "Australia", "Austria", "Bangladesh",
+                 "Belgium", "Brazil", "Canada", "China", "Denmark", "Egypt", "Finland", "France", "Germany",
+                 "India", "Indonesia", "Iran", "Iraq", "Italy", "Japan", "Mexico", "Netherlands", "Norway",
+                 "Pakistan", "Poland", "Portugal", "Russia", "Saudi Arabia", "South Africa", "Spain", "Sweden",
+                 "Switzerland", "Turkey", "United Kingdom", "United States", "Other"]
+            )
+            phone = st.text_input("Phone Number*", placeholder="+1234567890")
+            dob = st.date_input("Date of Birth", max_value=datetime.now().date())
 
-        submit_button = st.form_submit_button("Create Account")
+        submit = st.form_submit_button("Create Account")
 
-        if submit_button:
-            # Validation
-            errors = []
+    if submit:
+        errs = []
+        if not username or len(username) < 3:
+            errs.append("Username must be at least 3 characters")
+        if not email or not validate_email(email):
+            errs.append("Enter a valid email address")
+        if not password or len(password) < 6:
+            errs.append("Password must be at least 6 characters")
+        if password != confirm:
+            errs.append("Passwords do not match")
+        if not full_name:
+            errs.append("Full name is required")
+        if not nationality:
+            errs.append("Please select your nationality")
+        if not phone or not validate_phone(phone):
+            errs.append("Enter a valid phone number")
 
-            if not username or len(username) < 3:
-                errors.append("Username must be at least 3 characters")
-            if not email or not validate_email(email):
-                errors.append("Please enter a valid email address")
-            if not password or len(password) < 6:
-                errors.append("Password must be at least 6 characters")
-            if password != confirm_password:
-                errors.append("Passwords do not match")
-            if not full_name:
-                errors.append("Full name is required")
-            if not nationality:
-                errors.append("Please select your nationality")
-            if not phone_number or not validate_phone(phone_number):
-                errors.append("Please enter a valid phone number")
-
-            if errors:
-                for error in errors:
-                    st.error(error)
+        if errs:
+            for e in errs:
+                st.error(e)
+        else:
+            ok, msg = register_user(username, email, password, full_name, nationality, phone, dob)
+            if ok:
+                st.success("Registration successful! You can now login with your credentials.")
+                # Set a flag to switch screens after the form completes rendering
+                st.session_state.show_register = False
+                st.session_state.just_registered = True
+                registered_now = True
             else:
-                success, message = register_user(
-                    username, email, password, full_name, 
-                    nationality, phone_number, date_of_birth
-                )
+                st.error(msg)
 
-                if success:
-                    st.success(message)
-                    st.info("You can now login with your credentials!")
-                    if st.button("Go to Login"):
-                        st.session_state.show_register = False
-                        st.rerun()
-                else:
-                    st.error(message)
+    # Move navigation buttons OUTSIDE the form to avoid APIException
+    if not registered_now:
+        st.markdown("---")
+        if st.button("Back to Login"):
+            st.session_state.show_register = False
+            st.rerun()
 
-    st.markdown("---")
-    if st.button("Back to Login"):
-        st.session_state.show_register = False
-        st.rerun()
+# After defining these functions, add this small hook in your main logic
+if st.session_state.get("just_registered"):
+    # Clear the flag and rerun to show the login screen cleanly
+    st.session_state.just_registered = False
+    st.rerun()
+
 
 def show_user_profile():
     """Show user profile in sidebar"""
@@ -1036,3 +1042,4 @@ else:
     st.markdown("---")
     st.markdown("⚽ **Soccer Analysis Toolkit** - Built with Streamlit")
     st.markdown("*Note: This app processes StatsBomb football data in JSON format.*")
+
