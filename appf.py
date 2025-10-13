@@ -197,7 +197,10 @@ def show_register():
                  "Switzerland", "Turkey", "United Kingdom", "United States", "Other"]
             )
             phone = st.text_input("Phone Number*", placeholder="+1234567890")
-            dob = st.date_input("Date of Birth", max_value=datetime.now().date())
+            dob = st.date_input("Date of Birth",
+                   min_value=datetime(1920, 1, 1).date(),
+                   max_value=datetime.now().date(),
+                   value=datetime(1990, 1, 1).date())
 
         submit = st.form_submit_button("Create Account")
 
@@ -1042,4 +1045,5 @@ else:
     st.markdown("---")
     st.markdown("⚽ **Soccer Analysis Toolkit** - Built with Streamlit")
     st.markdown("*Note: This app processes StatsBomb football data in JSON format.*")
+
 
